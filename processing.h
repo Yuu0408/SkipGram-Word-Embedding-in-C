@@ -6,6 +6,7 @@ typedef struct {
     int count;
 } VocabItem;
 
+char* my_strdup(const char* s);
 void read_corpus(const char *filename, char **corpus);
 void tokenize(const char *corpus, char ***tokens, int *token_count, char **stopwords, int num_stopwords);
 void save_tokens(const char *filename, char **tokens, int token_count);

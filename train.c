@@ -81,6 +81,239 @@ void backward_pass_batch(int *input_words, int *target_words, int batch_size, do
     }
 }
 
+// Function to loads model weights from a binary file into input and output weight matrices
+void load_model(const char *filename, double **input_weights, double **output_weights, int vocab_size, int embedding_dim) {
+    FILE *file = fopen(filename, "rb");
+    if (!file) {
+        printf("Error opening file for loading model: %s\n", strerror(errno));
+        return;
+    }
+
+    int file_vocab_size, file_embedding_dim;
+    fread(&file_vocab_size, sizeof(int), 1, file);
+    fread(&file_embedding_dim, sizeof(int), 1, file);
+    printf("vocab size: %d\n", vocab_size);
+    printf("file_vocab_size: %d\n", file_vocab_size);
+    printf("embedding_dim: %d\n", embedding_dim);
+    printf("file_embedding_dim: %d\n", file_embedding_dim);
+    if (file_vocab_size != vocab_size || file_embedding_dim != embedding_dim) {
+        printf("Error: Vocab size or embedding dimension does not match\n");
+        fclose(file);
+        return;
+    }
+
+    size_t expected_size = (size_t)embedding_dim;
+    for (int i = 0; i < vocab_size; i++) {
+        if (fread(input_weights[i], sizeof(double), expected_size, file) != expected_size) {
+            printf("Error reading input weights from file\n");
+            fclose(file);
+            return;
+        }
+        if (fread(output_weights[i], sizeof(double), expected_size, file) != expected_size) {
+            printf("Error reading output weights from file\n");
+            fclose(file);
+            return;
+        }
+    }
+
+    fclose(file);
+    printf("Model loaded from %s\n", filename);
+}
+
+// Function to calculate the learning rate based on the decay rate and step
+double learning_rate_schedule(double initial_learning_rate, int step, double decay_rate, int decay_steps) {
+    return initial_learning_rate * pow(decay_rate, (double) step / decay_steps);
+}
+
+// Function to save the trained model to a file
+void save_model(const char *filename, double **input_weights, double **output_weights, int vocab_size, int embedding_dim) {
+    FILE *file = fopen(filename, "wb");
+    int i;
+    if (file == NULL) {
+        fprintf(stderr, "Error opening file for saving model: %s\n", strerror(errno));
+        return;
+    }
+    fwrite(&vocab_size, sizeof(int), 1, file);
+    fwrite(&embedding_dim, sizeof(int), 1, file);
+
+    for (i = 0; i < vocab_size; i++) {
+        fwrite(input_weights[i], sizeof(double), embedding_dim, file);
+        fwrite(output_weights[i], sizeof(double), embedding_dim, file);
+    }
+
+    fclose(file);
+    printf("Model saved to %s\n", filename);
+}
+
+// Function to generate training data from token indices using a sliding window approach
+void generate_training_data(int *token_indices, int token_count, int window_size, int **train_input_words, int **train_target_words, int *train_pair_count, int **valid_input_words, int **valid_target_words, int *valid_pair_count) {
+    int i, j, pair_count = 0;
+    int max_pairs = token_count * window_size * 2;  // Maximum possible pairs
+
+    // Temporary storage for all pairs
+    int *temp_input_words = (int *) malloc(max_pairs * sizeof(int));
+    int *temp_target_words = (int *) malloc(max_pairs * sizeof(int));
+
+    if (temp_input_words == NULL || temp_target_words == NULL) {
+        printf("Error allocating memory for temporary training data: %s\n", strerror(errno));
+        return;
+    }
+
+    // Generate all possible (input, target) pairs
+    // printf("generated pair: \n");
+    for (i = 0; i < token_count; i++) {
+        for (j = 1; j <= window_size; j++) {
+            if (i - j >= 0) {
+                temp_input_words[pair_count] = token_indices[i];
+                temp_target_words[pair_count] = token_indices[i - j];
+                // printf("%d | %d\n", temp_input_words[pair_count], temp_target_words[pair_count]);
+                pair_count++;
+            }
+            if (i + j < token_count) {
+                temp_input_words[pair_count] = token_indices[i];
+                temp_target_words[pair_count] = token_indices[i + j];
+                // printf("%d | %d\n", temp_input_words[pair_count], temp_target_words[pair_count]);
+                pair_count++;
+            }
+        }
+    }
+
+    // Shuffle pairs
+    for (i = pair_count - 1; i > 0; i--) {
+        int index = rand() % (i + 1);
+        int temp_input = temp_input_words[i];
+        int temp_target = temp_target_words[i];
+        temp_input_words[i] = temp_input_words[index];
+        temp_target_words[i] = temp_target_words[index];
+        temp_input_words[index] = temp_input;
+        temp_target_words[index] = temp_target;
+    }
+
+    // Split into training and validation sets
+    int train_size = (int)(pair_count * 1);
+    int valid_size = pair_count - train_size;
+
+    *train_input_words = (int *) malloc(train_size * sizeof(int));
+    *train_target_words = (int *) malloc(train_size * sizeof(int));
+    *valid_input_words = (int *) malloc(valid_size * sizeof(int));
+    *valid_target_words = (int *) malloc(valid_size * sizeof(int));
+
+    if (*train_input_words == NULL || *train_target_words == NULL || *valid_input_words == NULL || *valid_target_words == NULL) {
+        printf("Error allocating memory for training/validation data: %s\n", strerror(errno));
+        return;
+    }
+
+    // Copy the shuffled pairs into training and validation arrays
+    for (i = 0; i < train_size; i++) {
+        (*train_input_words)[i] = temp_input_words[i];
+        (*train_target_words)[i] = temp_target_words[i];
+    }
+
+    for (i = 0; i < valid_size; i++) {
+        (*valid_input_words)[i] = temp_input_words[train_size + i];
+        (*valid_target_words)[i] = temp_target_words[train_size + i];
+    }
+
+    *train_pair_count = train_size;
+    *valid_pair_count = valid_size;
+
+    free(temp_input_words);
+    free(temp_target_words);
+}
+
+// Function to evaluate the trained model on a validation set using top x accuracy
+void evaluate_model(double **input_weights, double **output_weights, int *input_words, int *target_words, int pair_count, int vocab_size, int embedding_dim, int batch_size, double *top_accuracy, int x) {
+    int i, j, b;
+
+    int correct_predictions = 0;
+
+    double **hidden_layer = (double **) malloc(batch_size * sizeof(double *));
+    double **output_layer = (double **) malloc(batch_size * sizeof(double *));
+    double **output_probs = (double **) malloc(batch_size * sizeof(double *));
+    for (i = 0; i < batch_size; i++) {
+        hidden_layer[i] = (double *) malloc(embedding_dim * sizeof(double));
+        output_layer[i] = (double *) malloc(vocab_size * sizeof(double));
+        output_probs[i] = (double *) malloc(vocab_size * sizeof(double));
+    }
+
+    // Evaluate the model in batches
+    for (i = 0; i < pair_count; i += batch_size) {
+        int current_batch_size;
+        if (i + batch_size <= pair_count) {
+            current_batch_size = batch_size;
+        } else {
+            current_batch_size = pair_count - i;
+        }
+
+        // Process each batch
+        for (b = 0; b < current_batch_size; b++) {
+            int input_word = input_words[i + b];
+            // printf("Input word: %d\n", input_word);
+            for (j = 0; j < embedding_dim; j++) {
+                hidden_layer[b][j] = input_weights[input_word][j];
+            }
+            for (j = 0; j < vocab_size; j++) {
+                output_layer[b][j] = 0.0;
+                for (int k = 0; k < embedding_dim; k++) {
+                    output_layer[b][j] += hidden_layer[b][k] * output_weights[j][k];
+                }
+            }
+            softmax(output_layer[b], vocab_size, output_probs[b]);
+
+
+
+            // Check top-x predictions
+            int *top_predicted_words = (int *)malloc(x * sizeof(int));
+            for (j = 0; j < x; j++) {
+                top_predicted_words[j] = -1;
+            }
+            for (j = 0; j < x; j++) {
+                int max_index = -1;
+                double max_val = -1.0;
+                for (int k = 0; k < vocab_size; k++) {
+                    int already_chosen = 0;
+                    for (int l = 0; l < j; l++) {
+                        if (top_predicted_words[l] == k) {
+                            already_chosen = 1;
+                            break;
+                        }
+                    }
+                    if (!already_chosen && output_probs[b][k] > max_val) {
+                        max_val = output_probs[b][k];
+                        max_index = k;
+                    }
+                }
+                top_predicted_words[j] = max_index;
+            }
+            // printf("Targeted word: %d\n", target_words[i + b]);
+            // printf("Top predicted word: ");
+            for (j = 0; j < x; j++) {
+                // printf("%d ", top_predicted_words[j]);
+                if (top_predicted_words[j] == target_words[i + b]) {
+                    correct_predictions++;
+                    break;
+                }
+            }
+            free(top_predicted_words);
+            // printf("\n");
+        }
+    }
+    printf("Correction: %d | pair count: %d\n", correct_predictions, pair_count);
+
+    // Free memory
+    for (i = 0; i < batch_size; i++) {
+        free(hidden_layer[i]);
+        free(output_layer[i]);
+        free(output_probs[i]);
+    }
+    free(hidden_layer);
+    free(output_layer);
+    free(output_probs);
+
+    // Calculate and return top-x accuracy and average loss
+    *top_accuracy = (double)correct_predictions / pair_count;
+}
+
 // Function to train the neural network model
 void train_model(char **tokens, int token_count, int window_size, int embedding_dim, double initial_learning_rate, double decay_rate, int decay_steps, int epochs, int batch_size, VocabItem *vocab, int vocab_size, int exist_model, char *model_filename, int x) {
     int i, j, b, epoch;
@@ -240,198 +473,3 @@ void train_model(char **tokens, int token_count, int window_size, int embedding_
     free(token_indices);
     printf("Training completed.\n");
 }
-
-// Function to calculate the learning rate based on the decay rate and step
-double learning_rate_schedule(double initial_learning_rate, int step, double decay_rate, int decay_steps) {
-    return initial_learning_rate * pow(decay_rate, (double) step / decay_steps);
-}
-
-// Function to save the trained model to a file
-void save_model(const char *filename, double **input_weights, double **output_weights, int vocab_size, int embedding_dim) {
-    FILE *file = fopen(filename, "wb");
-    int i;
-    if (file == NULL) {
-        fprintf(stderr, "Error opening file for saving model: %s\n", strerror(errno));
-        return;
-    }
-    fwrite(&vocab_size, sizeof(int), 1, file);
-    fwrite(&embedding_dim, sizeof(int), 1, file);
-
-    for (i = 0; i < vocab_size; i++) {
-        fwrite(input_weights[i], sizeof(double), embedding_dim, file);
-        fwrite(output_weights[i], sizeof(double), embedding_dim, file);
-    }
-
-    fclose(file);
-    printf("Model saved to %s\n", filename);
-}
-
-// Function to generate training data from token indices using a sliding window approach
-void generate_training_data(int *token_indices, int token_count, int window_size, int **train_input_words, int **train_target_words, int *train_pair_count, int **valid_input_words, int **valid_target_words, int *valid_pair_count) {
-    int i, j, pair_count = 0;
-    int max_pairs = token_count * window_size * 2;  // Maximum possible pairs
-
-    // Temporary storage for all pairs
-    int *temp_input_words = (int *) malloc(max_pairs * sizeof(int));
-    int *temp_target_words = (int *) malloc(max_pairs * sizeof(int));
-
-    if (temp_input_words == NULL || temp_target_words == NULL) {
-        printf("Error allocating memory for temporary training data: %s\n", strerror(errno));
-        return;
-    }
-
-    // Generate all possible (input, target) pairs
-    // printf("generated pair: \n");
-    for (i = 0; i < token_count; i++) {
-        for (j = 1; j <= window_size; j++) {
-            if (i - j >= 0) {
-                temp_input_words[pair_count] = token_indices[i];
-                temp_target_words[pair_count] = token_indices[i - j];
-                // printf("%d | %d\n", temp_input_words[pair_count], temp_target_words[pair_count]);
-                pair_count++;
-            }
-            if (i + j < token_count) {
-                temp_input_words[pair_count] = token_indices[i];
-                temp_target_words[pair_count] = token_indices[i + j];
-                // printf("%d | %d\n", temp_input_words[pair_count], temp_target_words[pair_count]);
-                pair_count++;
-            }
-        }
-    }
-
-    // Shuffle pairs
-    for (i = pair_count - 1; i > 0; i--) {
-        int index = rand() % (i + 1);
-        int temp_input = temp_input_words[i];
-        int temp_target = temp_target_words[i];
-        temp_input_words[i] = temp_input_words[index];
-        temp_target_words[i] = temp_target_words[index];
-        temp_input_words[index] = temp_input;
-        temp_target_words[index] = temp_target;
-    }
-
-    // Split into training and validation sets
-    int train_size = (int)(pair_count * 1);
-    int valid_size = pair_count - train_size;
-
-    *train_input_words = (int *) malloc(train_size * sizeof(int));
-    *train_target_words = (int *) malloc(train_size * sizeof(int));
-    *valid_input_words = (int *) malloc(valid_size * sizeof(int));
-    *valid_target_words = (int *) malloc(valid_size * sizeof(int));
-
-    if (*train_input_words == NULL || *train_target_words == NULL || *valid_input_words == NULL || *valid_target_words == NULL) {
-        printf("Error allocating memory for training/validation data: %s\n", strerror(errno));
-        return;
-    }
-
-    // Copy the shuffled pairs into training and validation arrays
-    for (i = 0; i < train_size; i++) {
-        (*train_input_words)[i] = temp_input_words[i];
-        (*train_target_words)[i] = temp_target_words[i];
-    }
-
-    for (i = 0; i < valid_size; i++) {
-        (*valid_input_words)[i] = temp_input_words[train_size + i];
-        (*valid_target_words)[i] = temp_target_words[train_size + i];
-    }
-
-    *train_pair_count = train_size;
-    *valid_pair_count = valid_size;
-
-    free(temp_input_words);
-    free(temp_target_words);
-}
-
-// Function to evaluate the trained model on a validation set using top x accuracy
-void evaluate_model(double **input_weights, double **output_weights, int *input_words, int *target_words, int pair_count, int vocab_size, int embedding_dim, int batch_size, double *top_accuracy, int x) {
-    int i, j, b;
-
-    int correct_predictions_top1 = 0;
-    int correct_predictions = 0;
-
-    double **hidden_layer = (double **) malloc(batch_size * sizeof(double *));
-    double **output_layer = (double **) malloc(batch_size * sizeof(double *));
-    double **output_probs = (double **) malloc(batch_size * sizeof(double *));
-    for (i = 0; i < batch_size; i++) {
-        hidden_layer[i] = (double *) malloc(embedding_dim * sizeof(double));
-        output_layer[i] = (double *) malloc(vocab_size * sizeof(double));
-        output_probs[i] = (double *) malloc(vocab_size * sizeof(double));
-    }
-
-    // Evaluate the model in batches
-    for (i = 0; i < pair_count; i += batch_size) {
-        int current_batch_size;
-        if (i + batch_size <= pair_count) {
-            current_batch_size = batch_size;
-        } else {
-            current_batch_size = pair_count - i;
-        }
-
-        // Process each batch
-        for (b = 0; b < current_batch_size; b++) {
-            int input_word = input_words[i + b];
-            // printf("Input word: %d\n", input_word);
-            for (j = 0; j < embedding_dim; j++) {
-                hidden_layer[b][j] = input_weights[input_word][j];
-            }
-            for (j = 0; j < vocab_size; j++) {
-                output_layer[b][j] = 0.0;
-                for (int k = 0; k < embedding_dim; k++) {
-                    output_layer[b][j] += hidden_layer[b][k] * output_weights[j][k];
-                }
-            }
-            softmax(output_layer[b], vocab_size, output_probs[b]);
-
-
-
-            // Check top-x predictions
-            int top_predicted_words[x];
-            for (j = 0; j < x; j++) {
-                top_predicted_words[j] = -1;
-            }
-            for (j = 0; j < x; j++) {
-                int max_index = -1;
-                double max_val = -1.0;
-                for (int k = 0; k < vocab_size; k++) {
-                    int already_chosen = 0;
-                    for (int l = 0; l < j; l++) {
-                        if (top_predicted_words[l] == k) {
-                            already_chosen = 1;
-                            break;
-                        }
-                    }
-                    if (!already_chosen && output_probs[b][k] > max_val) {
-                        max_val = output_probs[b][k];
-                        max_index = k;
-                    }
-                }
-                top_predicted_words[j] = max_index;
-            }
-            // printf("Targeted word: %d\n", target_words[i + b]);
-            // printf("Top predicted word: ");
-            for (j = 0; j < x; j++) {
-                // printf("%d ", top_predicted_words[j]);
-                if (top_predicted_words[j] == target_words[i + b]) {
-                    correct_predictions++;
-                    break;
-                }
-            }
-            // printf("\n");
-        }
-    }
-    printf("Correction: %d | pair count: %d\n", correct_predictions, pair_count);
-
-    // Free memory
-    for (i = 0; i < batch_size; i++) {
-        free(hidden_layer[i]);
-        free(output_layer[i]);
-        free(output_probs[i]);
-    }
-    free(hidden_layer);
-    free(output_layer);
-    free(output_probs);
-
-    // Calculate and return top-x accuracy and average loss
-    *top_accuracy = (double)correct_predictions / pair_count;
-}
-

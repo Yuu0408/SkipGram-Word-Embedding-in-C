@@ -8,9 +8,9 @@
 
 
 int main() {
-    const char *model_filename = "word2vec_model.bin";
+    const char *model_filename = "word2vec_model_1K_checkpoint3.bin";
     const char *vocab_filename = "vocab.txt";
-    int embedding_dim = 50; 
+    int embedding_dim = 150; 
     int vocab_size;
     int i;
 

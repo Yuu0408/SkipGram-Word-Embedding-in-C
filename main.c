@@ -22,17 +22,17 @@ int file_exists(const char *filename) {
 int main() {
     const char *corpus_filename = "text.txt";
     const char *tokens_filename = "tokens.txt";
-    const char *model_filename = "word2vec_model.bin";
+    const char *model_filename = "word2vec_model_test.bin";
     const char *vocab_filename = "vocab.txt";
     const char *stopwords_filename = "stop_words_english.txt";
     int window_size = 2;
     int embedding_dim = 150;
-    double initial_learning_rate = 0.05;
+    double initial_learning_rate = 0.005;
     double decay_rate = 0.96;
-    int decay_steps = 50;
-    int epochs = 5;
-    int batch_size = 256;
-    int top_x = 20;
+    int decay_steps = 100;
+    int epochs = 10;
+    int batch_size = 128;
+    int top_x = 10;
     int i;
 
     char **tokens;

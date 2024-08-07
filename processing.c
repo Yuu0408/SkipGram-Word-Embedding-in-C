@@ -4,6 +4,13 @@
 #include <string.h>
 #include <errno.h>
 
+// Function for string duplication
+char* my_strdup(const char* s) {
+    char* p = malloc(strlen(s) + 1);
+    if (p) strcpy(p, s);
+    return p;
+}
+
 // Function to read an entire file into a memory buffer
 void read_corpus(const char *filename, char **corpus) {
     FILE *file = fopen(filename, "r");
@@ -82,7 +89,7 @@ void free_stopwords(char **stopwords, int num_stopwords) {
 // Function to tokenize the corpus into words excluding stopwords
 void tokenize(const char *corpus, char ***tokens, int *token_count, char **stopwords, int num_stopwords) {
     printf("Starting tokenization...\n");
-    int MAX_TOKENS = 100000; // Limit maximum number of tokens to 500
+    int MAX_TOKENS = 1000; // Limit maximum number of tokens to 500
     *tokens = (char **) malloc(MAX_TOKENS * sizeof(char *));
     if (*tokens == NULL) {
         printf("Memory allocation for tokens failed: %s\n", strerror(errno));
@@ -190,7 +197,7 @@ void load_tokens(const char *filename, char ***tokens, int *token_count) {
     char buffer[100];
     while (fgets(buffer, sizeof(buffer), file) && *token_count < capacity) {
         buffer[strcspn(buffer, "\n")] = '\0';
-        (*tokens)[*token_count] = strdup(buffer);
+        (*tokens)[*token_count] = my_strdup(buffer);
         (*token_count)++;
     }
 
@@ -226,7 +233,7 @@ void build_vocab(char **tokens, int token_count, VocabItem **vocab, int *vocab_s
                     return;
                 }
             }
-            (*vocab)[*vocab_size].word = strdup(tokens[i]);
+            (*vocab)[*vocab_size].word = my_strdup(tokens[i]);
             (*vocab)[*vocab_size].count = 1;
             (*vocab_size)++;
         }

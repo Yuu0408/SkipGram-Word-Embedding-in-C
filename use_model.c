@@ -12,44 +12,6 @@ void get_word_embedding(int word_index, double **input_weights, double *embeddin
     }
 }
 
-// Function to loads model weights from a binary file into input and output weight matrices
-void load_model(const char *filename, double **input_weights, double **output_weights, int vocab_size, int embedding_dim) {
-    FILE *file = fopen(filename, "rb");
-    if (!file) {
-        printf("Error opening file for loading model: %s\n", strerror(errno));
-        return;
-    }
-
-    int file_vocab_size, file_embedding_dim;
-    fread(&file_vocab_size, sizeof(int), 1, file);
-    fread(&file_embedding_dim, sizeof(int), 1, file);
-    printf("vocab size: %d\n", vocab_size);
-    printf("file_vocab_size: %d\n", file_vocab_size);
-    printf("embedding_dim: %d\n", embedding_dim);
-    printf("file_embedding_dim: %d\n", file_embedding_dim);
-    if (file_vocab_size != vocab_size || file_embedding_dim != embedding_dim) {
-        printf("Error: Vocab size or embedding dimension does not match\n");
-        fclose(file);
-        return;
-    }
-
-    for (int i = 0; i < vocab_size; i++) {
-        if (fread(input_weights[i], sizeof(double), embedding_dim, file) != embedding_dim) {
-            printf("Error reading input weights from file\n");
-            fclose(file);
-            return;
-        }
-        if (fread(output_weights[i], sizeof(double), embedding_dim, file) != embedding_dim) {
-            printf("Error reading output weights from file\n");
-            fclose(file);
-            return;
-        }
-    }
-
-    fclose(file);
-    printf("Model loaded from %s\n", filename);
-}
-
 int predict_word(int input_word, double **input_weights, double **output_weights, int vocab_size, int embedding_dim) {
     double *hidden_layer = (double *)malloc(embedding_dim * sizeof(double));
     double *output_layer = (double *)malloc(vocab_size * sizeof(double));
@@ -130,7 +92,7 @@ void load_vocab(const char *filename, VocabItem **vocab, int *vocab_size) {
                 return;
             }
         }
-        (*vocab)[*vocab_size].word = strdup(word);
+        (*vocab)[*vocab_size].word = my_strdup(word);
         (*vocab)[*vocab_size].count = count;
         (*vocab_size)++;
     }
@@ -144,6 +106,18 @@ const char* get_word_by_index(int index, VocabItem *vocab, int vocab_size) {
         return NULL;
     }
     return vocab[index].word;
+}
+
+double cosine_similarity(double *vec1, double *vec2, int size) {
+    double dot_product = 0.0;
+    double norm_vec1 = 0.0;
+    double norm_vec2 = 0.0;
+    for (int i = 0; i < size; i++) {
+        dot_product += vec1[i] * vec2[i];
+        norm_vec1 += vec1[i] * vec1[i];
+        norm_vec2 += vec2[i] * vec2[i];
+    }
+    return dot_product / (sqrt(norm_vec1) * sqrt(norm_vec2));
 }
 
 void find_top_5_similar_words(int target_index, VocabItem *vocab, int vocab_size, double **input_weights, int embedding_dim, char **top_words) {
@@ -181,16 +155,4 @@ void find_top_5_similar_words(int target_index, VocabItem *vocab, int vocab_size
             top_words[i] = NULL;
         }
     }
-}
-
-double cosine_similarity(double *vec1, double *vec2, int size) {
-    double dot_product = 0.0;
-    double norm_vec1 = 0.0;
-    double norm_vec2 = 0.0;
-    for (int i = 0; i < size; i++) {
-        dot_product += vec1[i] * vec2[i];
-        norm_vec1 += vec1[i] * vec1[i];
-        norm_vec2 += vec2[i] * vec2[i];
-    }
-    return dot_product / (sqrt(norm_vec1) * sqrt(norm_vec2));
 }
