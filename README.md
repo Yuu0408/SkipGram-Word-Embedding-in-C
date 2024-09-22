@@ -39,6 +39,21 @@ Once the compilation is successful, start the training process with:
 ./word2vec
 ```
 
+#### 1.2 Using the Model
+Once the model has been trained, you can use it to retrieve word embeddings, make predictions for new words, search for similar words, etc. The program for using the model is compiled into a separate executable, and you can compile it with the following command:
+
+```bash
+gcc test.c use_model.c preprocessing.c train.c -o test_model -lm
+```
+
+This command compiles `test.c`, `use_model.c`, `preprocessing.c`, and `train.c`, generating the `test_model` executable. To run the program, use the following command:
+
+```bash
+./test_model
+```
+
+When running the program, you need to specify the model file name and embedding dimensions. This will load the trained model and output embeddings, predictions, and the top 5 similar words for a specified word. By following these steps, you can effectively utilize the Skip-gram model.
+
 ### 2. Example Outputs
 
 This program created two models with different token counts: `word2vec model 1K` and `word2vec model 100K`. After training, we tested the models using the word `"teams"`.
@@ -66,7 +81,7 @@ Accuracy: 0.674512
 Time for 50 epochs: 198.523000 seconds
 ```
 
-Test Output for the word "teams":
+Test Output for the word `"teams"`:
 ```plaintext
 Word embedding: [-0.419234, 0.096878, 0.106686, ..., 0.226047]
 Predicted word: joint
@@ -98,7 +113,7 @@ Accuracy: 0.123977
 Time for 5 epochs: 76300.608000 seconds
 ```
 
-Test Output for the word "teams":
+Test Output for the word `"teams"`:
 ```plaintext
 Word embedding: [0.010331, -0.027175, 0.013893, ..., 0.040569]
 Predicted word: tokyo
